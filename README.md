@@ -1,36 +1,83 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Culpa
 
-## Getting Started
+A web app for tracking debts within a small group of people. One **Creator** (authenticated) manages entries; other **Viewers** access the group through a shared link in read-only mode.
 
-First, run the development server:
+> 📄 Full product spec: [docs/PRD.md](./docs/PRD.md) · Domain glossary: [CONTEXT.md](./CONTEXT.md) · Key decision: [ADR-0001](./docs/adr/0001-unified-entry-no-debt-entity.md)
+
+## How it works
+
+- A **Creator** signs in (Supabase magic link), creates a **Group** with a fixed currency, and adds **Participants** (named people, no accounts).
+- Every transaction is an **Entry** — either an **Expense** (someone fronted a cost, split into **Shares**) or a **Payment** (one person paid another to even up). Both share the same schema.
+- **Pairwise balances** ("Bob owes Alex €10") are *derived on read* from Shares — there is no stored debt table.
+- A **Viewer** opens the share link, picks "who am I?" from the participant list (stored in `localStorage` for personalization), and sees the same data read-only. Viewers poll every 30s while the tab is focused; no realtime in v1.
+
+Settling up is just recording a Payment Entry from debtor to creditor — there is no "mark as paid" toggle. See the [PRD](./docs/PRD.md) for the complete model, RLS rules, and v1 non-goals.
+
+## Tech stack
+
+| Layer | Choice |
+| --- | --- |
+| Framework | [Next.js 16](https://nextjs.org) (App Router) + React 19 |
+| Language | TypeScript |
+| Styling | Tailwind CSS v4 |
+| UI | [shadcn/ui](https://ui.shadcn.com) (Radix UI + Base UI primitives), lucide-react icons |
+| Auth & DB | [Supabase](https://supabase.com) — Auth (magic link) + Postgres, via [`@supabase/ssr`](https://supabase.com/docs/guides/auth/server-side) |
+| ORM / migrations | [Drizzle ORM](https://orm.drizzle.team) + drizzle-kit |
+| Validation | [Zod](https://zod.dev) |
+
+Supabase session refresh runs in `proxy.ts` (Next.js 16's renamed middleware), backed by `lib/supabase/middleware.ts`.
+
+## Getting started
+
+Requires [pnpm](https://pnpm.io) and a [Supabase](https://supabase.com) project.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local   # then fill in the values below
+pnpm db:push                 # apply the Drizzle schema to your database
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.example` to `.env.local` and fill in:
 
-## Learn More
+| Variable | Where to find it |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
+| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string |
 
-To learn more about Next.js, take a look at the following resources:
+For `DATABASE_URL`, use the **Transaction** pooler URL (port 6543) for the app runtime; use the **Session** pooler or direct connection (port 5432) for `drizzle-kit` migrations.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Script | Description |
+| --- | --- |
+| `pnpm dev` | Start the dev server |
+| `pnpm build` | Production build |
+| `pnpm start` | Serve the production build |
+| `pnpm lint` | Run ESLint |
+| `pnpm db:generate` | Generate a migration from `lib/db/schema.ts` |
+| `pnpm db:migrate` | Apply pending migrations |
+| `pnpm db:push` | Push the schema directly (dev convenience) |
+| `pnpm db:studio` | Open Drizzle Studio |
 
-## Deploy on Vercel
+## Project structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+app/                  Next.js App Router (routes, layout, global styles)
+components/           UI components (shadcn/ui)
+lib/
+  supabase/           Browser, server, and middleware Supabase clients
+  db/                 Drizzle schema and client
+docs/                 PRD and ADRs
+proxy.ts              Session-refresh middleware
+drizzle.config.ts     Drizzle Kit configuration
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+Built to deploy on [Vercel](https://vercel.com). Set the three environment variables above in the project, then connect the repo. See the [Next.js deployment docs](https://nextjs.org/docs/app/building-your-application/deploying) for details.
