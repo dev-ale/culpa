@@ -1,9 +1,11 @@
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   check,
   index,
   pgPolicy,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
@@ -94,3 +96,91 @@ export const participants = pgTable(
 
 export type Participant = typeof participants.$inferSelect
 export type NewParticipant = typeof participants.$inferInsert
+
+// An Entry: one recorded transaction in a Group. Two `kind`s — `expense` (the
+// payer fronted a real-world cost, split across one Share per Participant who
+// owes a piece) and `payment` (one Participant settling up with another). Both
+// share this schema; #14 introduces only `expense`. Amounts are integer minor
+// units (cents) — never floats — so no rounding drift is possible. The sum of an
+// Entry's Shares equals `total_amount`, enforced by a deferred constraint
+// trigger (see the entry-shares sum-guard migration) on top of Zod on write.
+export const entries = pgTable(
+  'entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => groups.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    // Integer minor units (cents). Must be strictly positive.
+    totalAmount: bigint('total_amount', { mode: 'number' }).notNull(),
+    // Who fronted the money for this Entry. No onDelete: Participants are only
+    // ever soft-removed (`removed_at`); a hard delete happens solely via Group
+    // cascade, where the Entry is removed in the same statement, so the default
+    // NO ACTION check passes while still blocking stray Participant deletes.
+    paidBy: uuid('paid_by')
+      .notNull()
+      .references(() => participants.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    check('entries_kind_chk', sql`${t.kind} in ('expense', 'payment')`),
+    check('entries_total_amount_pos_chk', sql`${t.totalAmount} > 0`),
+    // Entry list (most recent first) and pairwise-balance recompute both scan
+    // by Group.
+    index('entries_group_id_idx').on(t.groupId),
+    index('entries_paid_by_idx').on(t.paidBy),
+    // An Entry is reachable iff the caller owns its Group. Runtime queries scope
+    // by creator_id explicitly; this is defense-in-depth + the Viewer basis.
+    pgPolicy('entries_creator_all', {
+      for: 'all',
+      to: authenticatedRole,
+      using: sql`exists (select 1 from ${groups} where ${groups.id} = ${t.groupId} and ${groups.creatorId} = ${authUid})`,
+      withCheck: sql`exists (select 1 from ${groups} where ${groups.id} = ${t.groupId} and ${groups.creatorId} = ${authUid})`,
+    }),
+  ],
+)
+
+export type Entry = typeof entries.$inferSelect
+export type NewEntry = typeof entries.$inferInsert
+
+// A Share: "this Participant owes this much to the Entry's payer." The `amount`
+// (integer minor units) is the source of truth; the percentage is derived for
+// display only. One row per (entry, participant). A Participant may have a Share
+// on an Entry they paid (their own portion) — that nets to zero in the balance
+// computation, which is where "never owes themselves" lives, not here.
+export const shares = pgTable(
+  'shares',
+  {
+    entryId: uuid('entry_id')
+      .notNull()
+      .references(() => entries.id, { onDelete: 'cascade' }),
+    // No onDelete, for the same reason as entries.paid_by above.
+    participantId: uuid('participant_id')
+      .notNull()
+      .references(() => participants.id),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.entryId, t.participantId] }),
+    check('shares_amount_pos_chk', sql`${t.amount} > 0`),
+    // Pairwise balance sums Shares by participant across the Group.
+    index('shares_participant_id_idx').on(t.participantId),
+    // A Share is reachable iff the caller owns the Group of its Entry.
+    pgPolicy('shares_creator_all', {
+      for: 'all',
+      to: authenticatedRole,
+      using: sql`exists (select 1 from ${entries} join ${groups} on ${groups.id} = ${entries.groupId} where ${entries.id} = ${t.entryId} and ${groups.creatorId} = ${authUid})`,
+      withCheck: sql`exists (select 1 from ${entries} join ${groups} on ${groups.id} = ${entries.groupId} where ${entries.id} = ${t.entryId} and ${groups.creatorId} = ${authUid})`,
+    }),
+  ],
+)
+
+export type Share = typeof shares.$inferSelect
+export type NewShare = typeof shares.$inferInsert
