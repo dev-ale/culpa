@@ -3,17 +3,20 @@ import { notFound, redirect } from 'next/navigation'
 import { getGroupForCreator } from '@/lib/db/queries'
 import { createClient } from '@/lib/supabase/server'
 
-import { GroupOverview } from './group-overview'
+import { EntryForm } from './entry-form'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export default async function GroupPage({
+export default async function NewEntryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ kind?: string }>
 }) {
   const { id } = await params
+  const { kind } = await searchParams
 
   const supabase = await createClient()
   const {
@@ -23,7 +26,6 @@ export default async function GroupPage({
     redirect('/login')
   }
 
-  // A malformed id would throw on the uuid comparison; treat it as not found.
   if (!UUID_RE.test(id)) {
     notFound()
   }
@@ -35,28 +37,15 @@ export default async function GroupPage({
 
   const { group, participants } = data
 
-  const createdLabel = new Intl.DateTimeFormat('en', {
-    month: 'short',
-    day: 'numeric',
-  }).format(group.createdAt)
-
   return (
-    <GroupOverview
+    <EntryForm
       groupId={group.id}
-      title={group.title}
       currency={group.currency}
-      createdLabel={createdLabel}
+      initialKind={kind === 'payment' ? 'payment' : 'expense'}
       participants={participants.map((p) => ({
         id: p.id,
         displayName: p.displayName,
       }))}
-      // The Creator is always a Participant in their own Group, listed first —
-      // treat them as the viewer so their own balances read as "you".
-      viewerId={participants[0]?.id}
-      // Derived pairwise balances and the Entry list arrive with the entries
-      // feature; until then the Overview renders its empty states.
-      balances={[]}
-      entries={[]}
     />
   )
 }

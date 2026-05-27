@@ -2,6 +2,7 @@ import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
+import { CulpaLogo } from '@/components/culpa'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -35,9 +36,13 @@ export default async function NewGroupPage() {
         </Link>
       </Button>
 
-      <Card className="mt-4">
+      <div className="mt-4">
+        <CulpaLogo size={26} seed={5} />
+      </div>
+
+      <Card className="mt-3">
         <CardHeader>
-          <CardTitle className="text-xl">New group</CardTitle>
+          <CardTitle className="text-2xl">new group</CardTitle>
           <CardDescription>
             Pick a currency and add the people splitting costs. You can add more
             participants later.

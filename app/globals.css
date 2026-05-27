@@ -7,9 +7,22 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
-  --font-heading: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-print), "Bradley Hand", "Comic Sans MS", ui-rounded,
+    cursive;
+  --font-mono: var(--font-num), "Patrick Hand", ui-monospace, monospace;
+  --font-heading: var(--font-hand), "Bradley Hand", "Comic Sans MS", cursive;
+
+  /* scribble palette, surfaced to Tailwind as text-/bg-/border- utilities */
+  --color-paper: var(--paper);
+  --color-paper-warm: var(--paper-warm);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-pencil: var(--pencil);
+  --color-pencil-soft: var(--pencil-soft);
+  --color-red: var(--red);
+  --color-green: var(--green);
+  --color-highlighter: var(--highlighter);
+  --color-grid: var(--grid);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,38 +62,54 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* ── scribble palette: quadrille paper, ballpoint inks, highlighter ── */
+  --paper: #faf7ee;
+  --paper-warm: #f5efdd;
+  --grid: #c6d1de; /* faint blue quadrille */
+  --grid-strong: #a8b5c4;
+  --ink: #1b2845; /* navy ballpoint */
+  --ink-soft: #44516b;
+  --pencil: #6b6f78;
+  --pencil-soft: #9ba0aa;
+  --red: #c8362d; /* red ballpoint — owed */
+  --green: #2c7a4d; /* green ink — paid */
+  --highlighter: #ffe066;
+  --highlighter-soft: #fff1a8;
+  --sq: 22px; /* quadrille square */
+
+  /* ── shadcn tokens, mapped onto the palette so customised primitives inherit it ── */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: var(--paper-warm);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-warm);
+  --muted-foreground: var(--pencil);
+  --accent: var(--highlighter-soft);
+  --accent-foreground: var(--ink);
+  --destructive: var(--red);
+  --border: var(--pencil-soft);
+  --input: var(--pencil-soft);
+  --ring: var(--ink-soft);
+  --chart-1: var(--ink);
+  --chart-2: var(--red);
+  --chart-3: var(--green);
+  --chart-4: var(--ink-soft);
+  --chart-5: var(--pencil);
+  --radius: 0.25rem;
+  --sidebar: var(--paper-warm);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--paper);
+  --sidebar-accent: var(--highlighter-soft);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--pencil-soft);
+  --sidebar-ring: var(--ink-soft);
 }
 
 .dark {
@@ -123,8 +152,103 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 17px;
   }
   html {
     @apply font-sans;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Scribble base — squared notebook page + handwriting type scale.
+   In @layer base so Tailwind utilities (e.g. responsive text-[clamp])
+   still override these defaults where a screen needs them.
+   ───────────────────────────────────────────────────────────── */
+@layer base {
+
+/* THE PAGE — squared quadrille background, painted on <body>. */
+.culpa-paper {
+  background-color: var(--paper);
+  background-image:
+    /* major grid (every 5 squares) */
+    linear-gradient(to right, rgba(168, 181, 196, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(168, 181, 196, 0.45) 1px, transparent 1px),
+    /* minor grid (every square) */
+      linear-gradient(to right, rgba(198, 209, 222, 0.55) 0.75px, transparent 0.75px),
+    linear-gradient(to bottom, rgba(198, 209, 222, 0.55) 0.75px, transparent 0.75px);
+  background-size:
+    calc(var(--sq) * 5) calc(var(--sq) * 5),
+    calc(var(--sq) * 5) calc(var(--sq) * 5),
+    var(--sq) var(--sq),
+    var(--sq) var(--sq);
+}
+
+/* handwriting type scale */
+.c-hand {
+  font-family: var(--font-hand), cursive;
+  font-weight: 600;
+  line-height: 0.95;
+}
+.c-h1 {
+  font-family: var(--font-hand), cursive;
+  font-weight: 700;
+  font-size: 56px;
+  line-height: 0.9;
+  letter-spacing: -0.005em;
+}
+.c-h2 {
+  font-family: var(--font-hand), cursive;
+  font-weight: 600;
+  font-size: 36px;
+  line-height: 1;
+}
+.c-h3 {
+  font-family: var(--font-hand), cursive;
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.05;
+}
+.c-label {
+  font-family: var(--font-print), cursive;
+  font-size: 14px;
+  color: var(--pencil);
+  letter-spacing: 0.01em;
+}
+.c-tiny {
+  font-family: var(--font-print), cursive;
+  font-size: 13px;
+  color: var(--pencil);
+}
+
+/* money — Kalam numerals, tight currency symbol */
+.c-money {
+  font-family: var(--font-num), monospace;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+  font-size: 20px;
+}
+.c-money .sym {
+  font-weight: 400;
+  margin-right: 1px;
+  color: var(--ink-soft);
+}
+.c-money .cents {
+  opacity: 0.55;
+}
+.c-money.lg {
+  font-size: 30px;
+}
+.c-money.sm {
+  font-size: 15px;
+}
+.c-money.owed {
+  color: var(--red);
+}
+.c-money.credit {
+  color: var(--green);
+}
+
+} /* @layer base */
