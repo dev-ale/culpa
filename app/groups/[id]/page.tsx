@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
+import { computePairwiseBalances } from '@/lib/balances'
 import { currencyLabel } from '@/lib/currencies'
 import {
   type EntryListItem,
@@ -43,6 +44,41 @@ export default async function GroupPage({
   const { group, participants } = data
   const entries = await listEntriesForGroup(group.id)
 
+  // Pairwise balances are derived on read from the Entries we already loaded —
+  // no stored Debt entity (ADR-0001), no extra query. Flatten the nested Entry
+  // shape into the (entry, share) rows the pure computation expects.
+  const balances = computePairwiseBalances(
+    entries.map((e) => ({ id: e.id, paidBy: e.paidBy })),
+    entries.flatMap((e) =>
+      e.shares.map((s) => ({
+        entryId: e.id,
+        participantId: s.participantId,
+        amount: s.amount,
+      })),
+    ),
+  )
+
+  // Names for every Participant an Entry references — including removed ones,
+  // whose names must still render in historical balances. The Entry list joins
+  // payer and Share names without the removed filter, so this map covers every
+  // id a balance can name.
+  const nameById = new Map<string, string>()
+  for (const e of entries) {
+    nameById.set(e.paidBy, e.payerName)
+    for (const s of e.shares) nameById.set(s.participantId, s.displayName)
+  }
+
+  // Sort by debtor then creditor name so the overview reads in a stable order
+  // rather than by opaque id.
+  const sortedBalances = [...balances].sort((a, b) => {
+    const fromCmp = (nameById.get(a.from) ?? '').localeCompare(
+      nameById.get(b.from) ?? '',
+    )
+    return fromCmp !== 0
+      ? fromCmp
+      : (nameById.get(a.to) ?? '').localeCompare(nameById.get(b.to) ?? '')
+  })
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 py-10">
       <Button asChild variant="ghost" size="sm" className="-ml-2 self-start">
@@ -58,6 +94,35 @@ export default async function GroupPage({
           {currencyLabel(group.currency)}
         </p>
       </header>
+
+      {entries.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-medium">Balances</h2>
+          {sortedBalances.length === 0 ? (
+            <p className="text-muted-foreground mt-3 rounded-lg ring-1 ring-foreground/10 px-4 py-6 text-center text-sm">
+              Everyone’s square.
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y rounded-lg ring-1 ring-foreground/10">
+              {sortedBalances.map((b) => (
+                <li
+                  key={`${b.from}-${b.to}`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                >
+                  <span>
+                    <span className="font-medium">{nameById.get(b.from)}</span>{' '}
+                    owes{' '}
+                    <span className="font-medium">{nameById.get(b.to)}</span>
+                  </span>
+                  <span className="tabular-nums">
+                    {formatMoney(b.amount, group.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <section className="mt-8">
         <div className="flex items-center justify-between">
