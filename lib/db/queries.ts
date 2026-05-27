@@ -154,6 +154,43 @@ export async function createExpenseEntry(input: {
   })
 }
 
+// Inserts a Payment Entry: one Participant (the debtor, `paidBy`) settling up
+// with another (the recipient). It's an Entry with `kind = 'payment'` and
+// exactly one Share, at the full amount, to the recipient — so the deferred
+// sum-guard (Share total == Entry total) is satisfied by construction. The
+// pairwise balance then derives the squared-up figure at read time; there is no
+// stored Debt or `settled` flag (ADR-0001). Callers must have already verified
+// Group ownership and that `paidBy` and `recipientId` are distinct Participants
+// of the Group.
+export async function createPaymentEntry(input: {
+  groupId: string
+  title: string
+  amount: number
+  paidBy: string
+  recipientId: string
+}): Promise<Entry> {
+  return db.transaction(async (tx) => {
+    const [entry] = await tx
+      .insert(entries)
+      .values({
+        groupId: input.groupId,
+        kind: 'payment',
+        title: input.title,
+        totalAmount: input.amount,
+        paidBy: input.paidBy,
+      })
+      .returning()
+
+    await tx.insert(shares).values({
+      entryId: entry.id,
+      participantId: input.recipientId,
+      amount: input.amount,
+    })
+
+    return entry
+  })
+}
+
 export type EntryShare = {
   participantId: string
   displayName: string

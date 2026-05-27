@@ -127,12 +127,20 @@ export default async function GroupPage({
       <section className="mt-8">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium">Entries ({entries.length})</h2>
-          <Button asChild size="sm">
-            <Link href={`/groups/${group.id}/expenses/new`}>
-              <Plus />
-              Record expense
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/groups/${group.id}/payments/new`}>
+                <Plus />
+                Record payment
+              </Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link href={`/groups/${group.id}/expenses/new`}>
+                <Plus />
+                Record expense
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {entries.length === 0 ? (
@@ -175,35 +183,45 @@ function EntryCard({
   entry: EntryListItem
   currency: string
 }) {
+  // A Payment is one Participant settling up with another: the payer (`paidBy`)
+  // is the debtor, its single Share names the recipient. It reads as a transfer,
+  // not a split, so it skips the per-Share percentage breakdown.
+  const isPayment = entry.kind === 'payment'
+  const recipientName = entry.shares[0]?.displayName ?? ''
+
   return (
     <li className="rounded-lg ring-1 ring-foreground/10">
       <div className="flex items-baseline justify-between gap-3 px-4 py-3">
         <div>
           <p className="font-medium">{entry.title}</p>
           <p className="text-muted-foreground text-xs">
-            Fronted by {entry.payerName}
+            {isPayment
+              ? `${entry.payerName} paid ${recipientName}`
+              : `Fronted by ${entry.payerName}`}
           </p>
         </div>
         <p className="font-medium tabular-nums">
           {formatMoney(entry.totalAmount, currency)}
         </p>
       </div>
-      <ul className="divide-y border-t text-sm">
-        {entry.shares.map((share) => (
-          <li
-            key={share.participantId}
-            className="flex items-center justify-between gap-3 px-4 py-2"
-          >
-            <span>{share.displayName}</span>
-            <span className="text-muted-foreground tabular-nums">
-              {formatMoney(share.amount, currency)}
-              <span className="ml-2 text-xs">
-                ({Math.round((share.amount / entry.totalAmount) * 100)}%)
+      {isPayment ? null : (
+        <ul className="divide-y border-t text-sm">
+          {entry.shares.map((share) => (
+            <li
+              key={share.participantId}
+              className="flex items-center justify-between gap-3 px-4 py-2"
+            >
+              <span>{share.displayName}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {formatMoney(share.amount, currency)}
+                <span className="ml-2 text-xs">
+                  ({Math.round((share.amount / entry.totalAmount) * 100)}%)
+                </span>
               </span>
-            </span>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   )
 }
