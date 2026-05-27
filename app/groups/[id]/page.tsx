@@ -1,4 +1,4 @@
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Edit, Plus } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
@@ -12,6 +12,9 @@ import {
 } from '@/lib/db/queries'
 import { formatMoney } from '@/lib/money'
 import { createClient } from '@/lib/supabase/server'
+import { DeleteEntryButton } from './expenses/delete-button'
+import { AddParticipantForm } from './participants/add-participant-form'
+import { RemoveParticipantButton } from './participants/remove-button'
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -154,6 +157,7 @@ export default async function GroupPage({
                 key={entry.id}
                 entry={entry}
                 currency={group.currency}
+                groupId={group.id}
               />
             ))}
           </ul>
@@ -164,13 +168,28 @@ export default async function GroupPage({
         <h2 className="text-sm font-medium">
           Participants ({participants.length})
         </h2>
-        <ul className="mt-3 divide-y rounded-lg ring-1 ring-foreground/10">
-          {participants.map((p) => (
-            <li key={p.id} className="px-4 py-3 text-sm">
-              {p.displayName}
-            </li>
-          ))}
-        </ul>
+        <div className="mt-3 space-y-3">
+          <ul className="divide-y rounded-lg ring-1 ring-foreground/10">
+            {participants.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+              >
+                <span>{p.displayName}</span>
+                <RemoveParticipantButton groupId={group.id} participantId={p.id} />
+              </li>
+            ))}
+          </ul>
+          <details className="rounded-lg ring-1 ring-foreground/10">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium hover:bg-foreground/5">
+              <Plus className="inline-block mr-2 size-4" />
+              Add participant
+            </summary>
+            <div className="border-t px-4 py-3">
+              <AddParticipantForm groupId={group.id} />
+            </div>
+          </details>
+        </div>
       </section>
     </div>
   )
@@ -179,9 +198,11 @@ export default async function GroupPage({
 function EntryCard({
   entry,
   currency,
+  groupId,
 }: {
   entry: EntryListItem
   currency: string
+  groupId: string
 }) {
   // A Payment is one Participant settling up with another: the payer (`paidBy`)
   // is the debtor, its single Share names the recipient. It reads as a transfer,
@@ -192,7 +213,7 @@ function EntryCard({
   return (
     <li className="rounded-lg ring-1 ring-foreground/10">
       <div className="flex items-baseline justify-between gap-3 px-4 py-3">
-        <div>
+        <div className="flex-1">
           <p className="font-medium">{entry.title}</p>
           <p className="text-muted-foreground text-xs">
             {isPayment
@@ -203,6 +224,19 @@ function EntryCard({
         <p className="font-medium tabular-nums">
           {formatMoney(entry.totalAmount, currency)}
         </p>
+        <div className="flex gap-1">
+          <Button
+            asChild
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Link href={`/groups/${groupId}/expenses/${entry.id}/edit`}>
+              <Edit className="size-4" />
+            </Link>
+          </Button>
+          <DeleteEntryButton entryId={entry.id} />
+        </div>
       </div>
       {isPayment ? null : (
         <ul className="divide-y border-t text-sm">

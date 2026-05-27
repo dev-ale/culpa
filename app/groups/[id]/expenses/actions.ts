@@ -4,7 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
-import { createExpenseEntry, getGroupForCreator } from '@/lib/db/queries'
+import {
+  createExpenseEntry,
+  deleteEntryForCreator,
+  getGroupForCreator,
+  getEntryWithSharesForCreator,
+  updateExpenseEntry,
+} from '@/lib/db/queries'
 import { parseAmountToCents } from '@/lib/money'
 import { createClient } from '@/lib/supabase/server'
 
@@ -162,4 +168,149 @@ export async function createExpense(
 
   revalidatePath(`/groups/${groupId}`)
   redirect(`/groups/${groupId}`)
+}
+
+export type EditExpenseState = {
+  status: 'idle' | 'error'
+  error?: string
+  fieldErrors?: CreateExpenseFieldErrors
+}
+
+export async function editExpense(
+  entryId: string,
+  _prevState: EditExpenseState,
+  formData: FormData,
+): Promise<EditExpenseState> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    redirect('/login')
+  }
+
+  const groupId = String(formData.get('groupId') ?? '')
+
+  const group = await getGroupForCreator(groupId, user.id)
+  if (!group) {
+    redirect('/dashboard')
+  }
+  const validParticipantIds = new Set(group.participants.map((p) => p.id))
+
+  const shareParticipantIds = formData
+    .getAll('shareParticipantId')
+    .map(String)
+  const shareAmountInputs = formData.getAll('shareAmount').map(String)
+
+  const fieldErrors: CreateExpenseFieldErrors = {}
+
+  const totalCents = parseAmountToCents(String(formData.get('total') ?? ''))
+  if (totalCents === null) {
+    fieldErrors.total = 'Enter a valid amount, e.g. 90.00.'
+  }
+
+  const parsedShares: { participantId: string; amount: number }[] = []
+  let badShareAmount = false
+  for (let i = 0; i < shareParticipantIds.length; i++) {
+    const amount = parseAmountToCents(shareAmountInputs[i] ?? '')
+    if (amount === null) {
+      badShareAmount = true
+      continue
+    }
+    parsedShares.push({ participantId: shareParticipantIds[i], amount })
+  }
+  if (badShareAmount) {
+    fieldErrors.shares = 'Each share must be a valid amount of at least 0.01.'
+  }
+
+  const parsed = expenseSchema.safeParse({
+    title: formData.get('title'),
+    totalCents: totalCents ?? undefined,
+    paidBy: formData.get('paidBy'),
+    shares: parsedShares,
+  })
+
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const key = FIELD_KEYS[String(issue.path[0])]
+      if (key && !fieldErrors[key]) fieldErrors[key] = issue.message
+    }
+  }
+
+  if (parsed.success) {
+    const { paidBy, shares } = parsed.data
+
+    if (!validParticipantIds.has(paidBy)) {
+      fieldErrors.paidBy = 'Choose who fronted the expense.'
+    }
+
+    const seen = new Set<string>()
+    for (const s of shares) {
+      if (!validParticipantIds.has(s.participantId)) {
+        fieldErrors.shares = 'A share references someone not in this group.'
+      }
+      if (seen.has(s.participantId)) {
+        fieldErrors.shares = 'A participant has more than one share.'
+      }
+      seen.add(s.participantId)
+    }
+
+    const shareSum = shares.reduce((sum, s) => sum + s.amount, 0)
+    if (!fieldErrors.shares && shareSum !== parsed.data.totalCents) {
+      fieldErrors.shares = 'Shares must add up to the total.'
+    }
+  }
+
+  if (!parsed.success || Object.keys(fieldErrors).length > 0) {
+    return {
+      status: 'error',
+      error: 'Check the highlighted fields.',
+      fieldErrors,
+    }
+  }
+
+  const data = parsed.data
+  try {
+    await updateExpenseEntry({
+      entryId,
+      title: data.title,
+      totalAmount: data.totalCents,
+      paidBy: data.paidBy,
+      shares: data.shares,
+    })
+  } catch {
+    return {
+      status: 'error',
+      error: 'Could not save the expense. Please try again.',
+    }
+  }
+
+  revalidatePath(`/groups/${groupId}`)
+  redirect(`/groups/${groupId}`)
+}
+
+export async function deleteExpense(
+  entryId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return { success: false, error: 'Not authenticated' }
+  }
+
+  try {
+    const deleted = await deleteEntryForCreator(entryId, user.id)
+    if (!deleted) {
+      return { success: false, error: 'Entry not found' }
+    }
+
+    // Need to revalidate from the entry's group. For now, revalidate a wildcard
+    // pattern since we don't know the groupId from here. This is fine as a fallback.
+    revalidatePath('/groups')
+    return { success: true }
+  } catch {
+    return { success: false, error: 'Could not delete the expense' }
+  }
 }

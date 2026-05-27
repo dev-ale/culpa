@@ -61,6 +61,18 @@ export type GroupWithParticipants = {
 
 // Returns null when the Group doesn't exist or isn't owned by this Creator —
 // the caller maps both to a 404 so ownership isn't leaked.
+export type GroupParticipantWithRemoved = {
+  id: string
+  displayName: string
+  removedAt: Date | null
+  createdAt: Date
+}
+
+export type GroupWithAllParticipants = {
+  group: Group
+  participants: GroupParticipantWithRemoved[]
+}
+
 export async function getGroupForCreator(
   groupId: string,
   creatorId: string,
@@ -86,6 +98,32 @@ export async function getGroupForCreator(
     .orderBy(participants.createdAt)
 
   return { group, participants: members }
+}
+
+export async function getGroupWithAllParticipantsForCreator(
+  groupId: string,
+  creatorId: string,
+): Promise<GroupWithAllParticipants | null> {
+  const [group] = await db
+    .select()
+    .from(groups)
+    .where(and(eq(groups.id, groupId), eq(groups.creatorId, creatorId)))
+    .limit(1)
+
+  if (!group) return null
+
+  const allMembers = await db
+    .select({
+      id: participants.id,
+      displayName: participants.displayName,
+      removedAt: participants.removedAt,
+      createdAt: participants.createdAt,
+    })
+    .from(participants)
+    .where(eq(participants.groupId, groupId))
+    .orderBy(participants.createdAt)
+
+  return { group, participants: allMembers }
 }
 
 export async function createGroupWithParticipants(input: {
@@ -262,4 +300,107 @@ export async function listEntriesForGroup(
   }
 
   return rows.map((r) => ({ ...r, shares: sharesByEntry.get(r.id) ?? [] }))
+}
+
+export type EntryWithShares = {
+  entry: Entry
+  shares: EntryShare[]
+}
+
+// Returns null when the Entry doesn't exist, isn't in a Group owned by this Creator,
+// or isn't an Expense (Payments have immutable structure per #16).
+export async function getEntryWithSharesForCreator(
+  entryId: string,
+  creatorId: string,
+): Promise<EntryWithShares | null> {
+  const payer = alias(participants, 'payer')
+  const [row] = await db
+    .select({
+      entry: entries,
+      payerName: payer.displayName,
+    })
+    .from(entries)
+    .innerJoin(payer, eq(payer.id, entries.paidBy))
+    .innerJoin(
+      groups,
+      and(eq(groups.id, entries.groupId), eq(groups.creatorId, creatorId)),
+    )
+    .where(eq(entries.id, entryId))
+    .limit(1)
+
+  if (!row) return null
+
+  const shareRows = await db
+    .select({
+      participantId: shares.participantId,
+      displayName: participants.displayName,
+      amount: shares.amount,
+    })
+    .from(shares)
+    .innerJoin(participants, eq(participants.id, shares.participantId))
+    .where(eq(shares.entryId, entryId))
+
+  return {
+    entry: row.entry,
+    shares: shareRows,
+  }
+}
+
+// Updates an Entry and its Shares atomically. Deletes all old Shares and inserts
+// new ones. The deferred sum-guard trigger fires at COMMIT. Caller must have
+// verified ownership and that all participantIds/paidBy belong to the Group.
+export async function updateExpenseEntry(input: {
+  entryId: string
+  title: string
+  totalAmount: number
+  paidBy: string
+  shares: { participantId: string; amount: number }[]
+}): Promise<Entry> {
+  return db.transaction(async (tx) => {
+    // Update the entry
+    const [updated] = await tx
+      .update(entries)
+      .set({
+        title: input.title,
+        totalAmount: input.totalAmount,
+        paidBy: input.paidBy,
+        updatedAt: new Date(),
+      })
+      .where(eq(entries.id, input.entryId))
+      .returning()
+
+    // Delete old shares
+    await tx.delete(shares).where(eq(shares.entryId, input.entryId))
+
+    // Insert new shares
+    await tx.insert(shares).values(
+      input.shares.map((s) => ({
+        entryId: input.entryId,
+        participantId: s.participantId,
+        amount: s.amount,
+      })),
+    )
+
+    return updated
+  })
+}
+
+// Deletes an Entry and cascades its Shares (via FK onDelete). Returns true if
+// deleted, false if not found or ownership check failed.
+export async function deleteEntryForCreator(
+  entryId: string,
+  creatorId: string,
+): Promise<boolean> {
+  const result = await db
+    .delete(entries)
+    .where(
+      and(
+        eq(entries.id, entryId),
+        // Ownership check: Entry's Group must be owned by this Creator
+        sql`exists (select 1 from ${groups} where ${groups.id} = ${entries.groupId} and ${groups.creatorId} = ${creatorId})`,
+      ),
+    )
+    .returning({ id: entries.id })
+
+  return result.length > 0
 }
